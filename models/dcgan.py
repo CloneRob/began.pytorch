@@ -38,13 +38,13 @@ class GeneratorUp(nn.Module):
         )
 
     def forward(self, input):
+        """
         gpu_ids = None
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
             gpu_ids = range(self.ngpu)
         return nn.parallel.data_parallel(self.main, input, gpu_ids)
         """
         return self.main(input)
-        """
 
 class Generator(nn.Module):
     def __init__(self, ngpu, ngf, nc, nz):

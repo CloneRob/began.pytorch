@@ -44,7 +44,7 @@ parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--gen', default='', help="path to netG (to continue training)")
 parser.add_argument('--dis', default='', help="path to netD (to continue training)")
 parser.add_argument('--start_epoch', type=int, default=0)
-parser.add_argument('--outf', default='./samples2', help='folder to output images and model checkpoints')
+parser.add_argument('--outf', default='./samples/sample0', help='folder to output images and model checkpoints')
 parser.add_argument('--device_id', default='', help='GPU device id where the model is run')
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--manualSeed', type=int, default=13)
@@ -81,14 +81,25 @@ def main():
     auxillary_variables = AuxilaryVariables(opt.batch_size, nz)
 
     began(generator, discriminator, dataloader, criterion, auxillary_variables)
+    # sample(generator, discriminator, auxillary_variables)
+
+def sample(generator, discriminator, auxillary_variables):
+    batch_size = int(opt.batch_size)
+
+    auxillary_variables.noise.data.resize_(batch_size, auxillary_variables.nz, 1, 1)
+    for i in range(0, 20):
+        auxillary_variables.noise.data.normal_(0, 0.7)
+        fakeg = generator(auxillary_variables.noise)
+        vutils.save_image(fakeg.data,'%s/%03d_fake_generator.png' % (opt.outf, i))
+        faked = discriminator(auxillary_variables.noise)
+        vutils.save_image(faked.data,'%s/%03d_fake_discriminator.png' % (opt.outf, i))
 
 def began(generator, discriminator, dataloader, criterion, aux):
     """Training of gan network
     """
-    feedback_control = Variable(torch.cuda.FloatTensor([0.008]), requires_grad=False)
+    feedback_control = Variable(torch.cuda.FloatTensor([0.01]), requires_grad=False)
     gamma = Variable(torch.cuda.FloatTensor([0.6]), requires_grad=False)
     k_var = Variable(torch.cuda.FloatTensor([float(opt.klr)]), requires_grad=False)
-    lower_bound = torch.cuda.FloatTensor([opt.lb])
 
     optimizerD = optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
     optimizerG = optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
@@ -101,7 +112,7 @@ def began(generator, discriminator, dataloader, criterion, aux):
             data_var = Variable(data)
             batch_size = data_var.size(0)
 
-            optimizerD.zero_grad()
+            # optimizerD.zero_grad()
             for p in discriminator.parameters():
                 p.requires_grad = True
             for p in generator.parameters():
@@ -124,7 +135,7 @@ def began(generator, discriminator, dataloader, criterion, aux):
             #################################
             #       Generator training      #
             #################################
-            optimizerG.zero_grad()
+            # optimizerG.zero_grad()
             for p in discriminator.parameters():
                 p.requires_grad = False
             for p in generator.parameters():
@@ -142,7 +153,7 @@ def began(generator, discriminator, dataloader, criterion, aux):
 
             equilibrium = (gamma * discriminator_realloss - generator_loss).detach()
             k_var += feedback_control * equilibrium
-            k_var.data = torch.max(k_var.data, lower_bound)
+            k_var.data.clamp_(opt.lb, 1.0)
             global_measure = discriminator_realloss  + equilibrium.norm()
 
             format_str = ('[{}/{}][{}/{}] Loss_D: {:.4f} Loss_G: {:.4f}, D(x): {:.4f}, D(G(z)): {:.4f}'
@@ -158,10 +169,11 @@ def began(generator, discriminator, dataloader, criterion, aux):
             if i % 125 == 0:
                 vutils.save_image(data_var.data,
                                   '%s/%03d_real_samples.png' % (opt.outf, epoch))
-                vutils.save_image(real_reconstruction.data,
+                vutils.save_image(real_reconstruction.data.mul(0.5).add(0.5),
                                   '%s/%03d_real_reconstruction.png' % (opt.outf, epoch))
 
                 fake = generator(aux.noise)
+                fake.data = fake.data.mul(0.5).add(0.5)
                 vutils.save_image(fake.data,
                                   '%s/%03d_fake_samples.png' % (opt.outf, epoch))
 
@@ -188,7 +200,8 @@ def get_dataloader():
     assert dataset
     print(len(dataset))
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size,
-                                             shuffle=True, num_workers=int(opt.workers))
+                                             shuffle=True, num_workers=int(opt.workers),
+                                             pin_memory=True)
     return dataloader
 
 class AuxilaryVariables():
@@ -235,7 +248,8 @@ def load_model(nc=3):
 
     # discriminator = model.Discriminator(ngpu, nz, int(opt.ngf), nc)
     # discriminator = dcgan.DiscriminatorUp(ngpu, int(opt.ngf), int(opt.ndf), nc, nz)
-    discriminator = nn.DataParallel(resnet18(ndf, nz))
+    discriminator = nn.DataParallel(resnet18(ngpu, ndf, nz))
+    # discriminator = resnet18(ngpu, ndf, nz)
     discriminator.apply(model.weights_init)
     if opt.dis != '':
         discriminator.load_state_dict(torch.load(opt.dis))
