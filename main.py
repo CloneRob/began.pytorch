@@ -83,6 +83,24 @@ def main():
     began(generator, discriminator, dataloader, criterion, auxillary_variables)
     # sample(generator, discriminator, auxillary_variables)
 
+def test():
+    """
+    simple tets function which tests output size
+    """
+    nz = int(opt.nz)
+    ndf = int(opt.ndf)
+    ngpu = int(opt.ngpu)
+
+    resnetdis = resnet18(ngpu, ndf, nz).cuda()
+    print(resnetdis)
+    dummy_data = torch.cuda.FloatTensor(100, 3, 64, 64)
+    print(dummy_data.size())
+
+    dummy_var = Variable(dummy_data)
+    output = resnetdis(dummy_var)
+    print(output.size())
+    assert output.size() == dummy_data.size()
+
 def sample(generator, discriminator, auxillary_variables):
     batch_size = int(opt.batch_size)
 
@@ -263,4 +281,5 @@ def load_model(nc=3):
     return generator, discriminator
 
 if __name__ == '__main__':
-    main()
+    # main()
+    test()
