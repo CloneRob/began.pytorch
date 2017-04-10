@@ -7,7 +7,7 @@ import os
 import random
 
 from models import model, dcgan
-from models.resnet import resnet18
+from models.resnet_refactor import resnet18
 import transformer as local_transforms
 
 import torch

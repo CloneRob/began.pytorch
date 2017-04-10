@@ -1,10 +1,14 @@
 from __future__ import print_function
 import math
 from enum import Enum
-import torch
+# import torch
 import torch.nn as nn
-import torch.nn.parallel
-import torch.utils.data
+# import torch.nn.parallel
+
+def conv1x1(in_planes, out_planes, stride=1):
+    "1x1 convolution with padding"
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride,
+                     padding=0, bias=False)
 
 def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"
@@ -16,20 +20,23 @@ def conv_transpose3x3(in_planes, out_planes, stride=2):
     return nn.ConvTranspose2d(in_planes, out_planes, kernel_size=3, stride=stride,
                               padding=1, bias=False)
 
+class BlockType(Enum):
+    UP=1
+    PLANE=2
+    DOWN=3
 
 class ResNetGenerator(nn.Module):
-
-    def __init__(self, block_up, layers, ngpu, ngf, nz):
+    def __init__(self, layers, ngpu, ngf, nz):
         self.inplanes = nz
         self.ngpu = ngpu
-        super(ResNetGenerator, self).__init__()
+        super().__init__()
 
         self.decoder = nn.Sequential(
             self._up_block(ngf * 6),
-            self._make_layer(block_up, ngf * 6, layers[3], stride=2),
-            self._make_layer(block_up, ngf * 4, layers[2], stride=2),
-            self._make_layer(block_up, ngf * 2, layers[1], stride=2),
-            self._make_layer(block_up, ngf, layers[0], stride=2),
+            self._make_layer(BlockType.UP, ngf * 6, layers[3]),
+            self._make_layer(BlockType.UP, ngf * 4, layers[2]),
+            self._make_layer(BlockType.UP, ngf * 2, layers[1]),
+            self._make_layer(BlockType.UP, ngf, layers[0]),
             nn.BatchNorm2d(ngf),
             nn.ReLU(inplace=True),
             nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
@@ -39,59 +46,52 @@ class ResNetGenerator(nn.Module):
     def _up_block(self, planes):
         upconv = nn.ConvTranspose2d(self.inplanes, planes, 4, 1, 0)
         self.inplanes = planes
-        return upconv
+        return nn.Sequential(upconv)
 
-    def _make_layer(self, block, planes, blocks, stride=1):
+    def _make_layer(self, block_type, planes, blocks):
         layers = []
-        sampler = None
 
-        if stride != 1:
-            if block._type() == BlockType.DOWN:
-                sampler = DownSample(self.inplanes, planes * block.expansion, stride).cuda()
-                layers.append(block(self.inplanes, planes * block.expansion, sampler))
-                self.inplanes = planes * block.expansion
-                for _ in range(1, blocks):
-                    layers.append(block(self.inplanes, planes))
-
-            elif block._type() == BlockType.UP:
-                for _ in range(1, blocks):
-                    layers.append(BasicDown(self.inplanes, self.inplanes))
-                sampler = UpSample(self.inplanes, planes * block.expansion).cuda()
-                layers.append(block(self.inplanes, planes, stride, sampler))
-                self.inplanes = planes
-
-        else:
-            self.inplanes = planes * block.expansion
+        if block_type == BlockType.DOWN:
+            layers.append(DownBlock(self.inplanes, planes))
+            for _ in range(1, blocks):
+                layers.append(PlaneBlock(planes))
+            self.inplanes = planes
+        elif block_type == BlockType.UP:
+            for _ in range(1, blocks):
+                layers.append(PlaneBlock(self.inplanes))
+            layers.append(UpBlock(self.inplanes, planes))
+            self.inplanes = planes
+        elif block_type == BlockType.PLANE:
             for _ in range(0, blocks):
-                layers.append(block(self.inplanes, planes))
+                layers.append(PlaneBlock(self.inplanes))
 
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.decoder(x)
+        out = self.decoder(x)
+        return out
 
 class ResNetDiscriminator(nn.Module):
-
-    def __init__(self, block_down, block_up, layers, ngpu, ndf, nz):
+    def __init__(self, layers, ngpu, ndf, nz):
         self.inplanes = ndf
         self.ngpu = ngpu
-        super(ResNetDiscriminator, self).__init__()
+        super().__init__()
 
         self.encoder = nn.Sequential(
             nn.Conv2d(3, ndf, kernel_size=7, stride=2, padding=3, bias=False),
-            self._make_layer(block_down, ndf, layers[0], stride=2),
-            self._make_layer(block_down, ndf * 2, layers[1], stride=2),
-            self._make_layer(block_down, ndf * 4, layers[2], stride=2),
-            self._make_layer(block_down, ndf * 6, layers[3], stride=2),
-            self._make_layer(block_down, nz, layers[4], stride=2),
+            self._make_layer(BlockType.DOWN, ndf, layers[0]),
+            self._make_layer(BlockType.DOWN, ndf * 2, layers[1]),
+            self._make_layer(BlockType.DOWN, ndf * 4, layers[2]),
+            self._make_layer(BlockType.DOWN, ndf * 6, layers[3]),
+            self._make_layer(BlockType.DOWN, nz, layers[4]),
             nn.Tanh()
         )
         self.decoder = nn.Sequential(
             self._up_block(ndf * 6),
-            self._make_layer(block_up, ndf * 6, layers[3], stride=2),
-            self._make_layer(block_up, ndf * 4, layers[2], stride=2),
-            self._make_layer(block_up, ndf * 2, layers[1], stride=2),
-            self._make_layer(block_up, ndf, layers[0], stride=2),
+            self._make_layer(BlockType.UP, ndf * 6, layers[3]),
+            self._make_layer(BlockType.UP, ndf * 4, layers[2]),
+            self._make_layer(BlockType.UP, ndf * 2, layers[1]),
+            self._make_layer(BlockType.UP, ndf, layers[0]),
             nn.BatchNorm2d(ndf),
             nn.ReLU(inplace=True),
             nn.Conv2d(ndf, 3, kernel_size=3, stride=1, padding=1, bias=False),
@@ -103,142 +103,99 @@ class ResNetDiscriminator(nn.Module):
         self.inplanes = planes
         return nn.Sequential(upconv)
 
-    def _make_layer(self, block, planes, blocks, stride=1):
+    def _make_layer(self, block_type, planes, blocks):
         layers = []
-        sampler = None
 
-        if stride != 1:
-            if block._type() == BlockType.DOWN:
-                sampler = DownSample(self.inplanes, planes * block.expansion, stride).cuda()
-                layers.append(block(self.inplanes, planes * block.expansion, stride, sampler))
-                self.inplanes = planes * block.expansion
-                for _ in range(1, blocks):
-                    layers.append(block(self.inplanes, planes))
-
-            elif block._type() == BlockType.UP:
-                for _ in range(1, blocks):
-                    layers.append(BasicDown(self.inplanes, self.inplanes))
-                sampler = UpSample(self.inplanes, planes * block.expansion).cuda()
-                layers.append(block(self.inplanes, planes, stride, sampler))
-                self.inplanes = planes
-
-        else:
-            self.inplanes = planes * block.expansion
+        if block_type == BlockType.DOWN:
+            layers.append(DownBlock(self.inplanes, planes))
+            for _ in range(1, blocks):
+                layers.append(PlaneBlock(planes))
+            self.inplanes = planes
+        elif block_type == BlockType.UP:
+            for _ in range(1, blocks):
+                layers.append(PlaneBlock(self.inplanes))
+            layers.append(UpBlock(self.inplanes, planes))
+            self.inplanes = planes
+        elif block_type == BlockType.PLANE:
             for _ in range(0, blocks):
-                layers.append(block(self.inplanes, planes))
+                layers.append(PlaneBlock(self.inplanes))
 
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.decoder(self.encoder(x))
+        code = self.encoder(x)
+        out = self.decoder(code)
+        return out
 
 
-class BlockType(Enum):
-    UP=1
-    DOWN=3
+class BasicBlock(nn.Module):
+    def __init__(self, planes):
+        super().__init__()
 
-class BasicUp(nn.Module):
-    expansion = 1
-    def __init__(self, inplanes, planes, stride=1, upsample=None):
-        super(BasicUp, self).__init__()
-        self.bn1 = nn.BatchNorm2d(inplanes)
+        self.bn = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
-        self.conv1 = conv3x3(inplanes, inplanes)
+        self.conv = conv3x3(planes, planes)
 
-        self.bn2 = nn.BatchNorm2d(inplanes)
-        self.upsample = upsample
+    def forward(self, x):
+        out = self.bn(x)
+        out = self.relu(out)
+        out = self.conv(out)
+        return out
+
+class PlaneBlock(BasicBlock):
+    _type = BlockType.PLANE
+    def __init__(self, planes):
+        super().__init__(planes)
+
+        self.bn = nn.BatchNorm2d(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv = conv3x3(planes, planes)
 
     def forward(self, x):
         residual = x
-        out = self.bn1(x)
+        out = self.bn(x)
         out = self.relu(out)
-        out = self.conv1(out)
+        out = self.conv(out)
+        return residual + BasicBlock.forward(self, out)
 
-        out = self.bn2(out)
-        out = self.relu(out)
-
-        if self.upsample is not None:
-            residual, out = self.upsample(residual, out)
-
-        out += residual
-        return out
-
-    @staticmethod
-    def _type():
-        return BlockType.UP
-
-class UpSample(nn.Module):
-
+class UpBlock(BasicBlock):
+    _type = BlockType.UP
     def __init__(self, inplanes, planes):
-        super(UpSample, self).__init__()
-        """
-        self.identity_branch = nn.Sequential(
-            nn.UpsamplingNearest2d(scale_factor=2),
-            nn.Conv2d(inplanes, planes, 1, 1, 0, bias=False),
-        )
-        self.weight_branch = nn.Sequential(
-            nn.UpsamplingNearest2d(scale_factor=2),
-            nn.Conv2d(inplanes, planes, 3, 1, 1, bias=False),
-        )
-        """
-        self.identity_branch = nn.Sequential(
-            nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False),
-        )
-        self.weight_branch = nn.Sequential(
-            nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False),
-        )
+        super().__init__(inplanes)
 
-    def forward(self, x1, x2):
-        return self.identity_branch(x1), self.weight_branch(x2)
-
-class BasicDown(nn.Module):
-    expansion = 1
-
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(BasicDown, self).__init__()
-        self.bn1 = nn.BatchNorm2d(inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv1 = conv3x3(inplanes, planes, stride)
-
-        self.bn2 = nn.BatchNorm2d(planes)
-        self.conv2 = conv3x3(planes, planes)
-        self.downsample = downsample
+        self.up_bn = nn.BatchNorm2d(inplanes)
+        self.up_conv = nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False)
+        self.shortcut = nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False)
 
     def forward(self, x):
-        residual = x
-
-        out = self.bn1(x)
+        residual = self.shortcut(x)
+        out = BasicBlock.forward(self, x)
+        out = self.up_bn(out)
         out = self.relu(out)
-        out = self.conv1(out)
-        if self.downsample is not None:
-            residual= self.downsample(residual)
+        out = self.up_conv(out)
+        return residual + out
 
-        out = self.bn2(out)
+class DownBlock(BasicBlock):
+    _type = BlockType.DOWN
+    def __init__(self, inplanes, planes):
+        super().__init__(planes)
+
+        self.down_bn = nn.BatchNorm2d(inplanes)
+        self.down_conv = conv3x3(inplanes, planes, stride=2)
+        self.shortcut = conv1x1(inplanes, planes, stride=2)
+
+    def forward(self, x):
+        residual = self.shortcut(x)
+        out = self.down_bn(x)
         out = self.relu(out)
-        out = self.conv2(out)
-
-        out += residual
-        return out
-
-    @staticmethod
-    def _type():
-        return BlockType.DOWN
-
-class DownSample(nn.Module):
-    def __init__(self, inplanes, planes, stride):
-        super(DownSample, self).__init__()
-        self.identity_branch = nn.Conv2d(inplanes, planes, 1, stride, 0, bias=False)
-
-    def forward(self, x1):
-        return self.identity_branch(x1)
+        out = self.down_conv(out)
+        return residual + BasicBlock.forward(self, out)
 
 
 
 def resnet18(ngpu, ngf, ndf, nz):
-    """Constructs a ResNet-18 model.
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """Constructs a ResNet-18 based generator and discriminator model.
     """
-    disc = ResNetDiscriminator(BasicDown, BasicUp, [2, 2, 2, 2, 2], ngpu, ndf, nz)
-    gen = ResNetGenerator(BasicUp, [2, 2, 2, 2], ngpu, ngf, nz)
-    return disc, gen 
+    disc = ResNetDiscriminator([2, 2, 2, 2, 2], ngpu, ndf, nz)
+    gen = ResNetGenerator([2, 2, 2, 2], ngpu, ngf, nz)
+    return disc, gen
