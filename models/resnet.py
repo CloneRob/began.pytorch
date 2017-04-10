@@ -25,23 +25,26 @@ class BlockType(Enum):
     PLANE=2
     DOWN=3
 
-class ResNetGenerator(nn.Module):
-    def __init__(self, layers, ngpu, ngf, nz):
-        self.inplanes = nz
+class ResNetBase(nn.Module):
+    """Resnet Base Class, contains methods for
+       weight initialization and layer creation
+    """
+    def __init__(self, ngpu, inplanes):
         self.ngpu = ngpu
+        self.inplanes = inplanes
         super().__init__()
 
-        self.decoder = nn.Sequential(
-            self._up_block(ngf * 6),
-            self._make_layer(BlockType.UP, ngf * 6, layers[3]),
-            self._make_layer(BlockType.UP, ngf * 4, layers[2]),
-            self._make_layer(BlockType.UP, ngf * 2, layers[1]),
-            self._make_layer(BlockType.UP, ngf, layers[0]),
-            nn.BatchNorm2d(ngf),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.Tanh()
-        )
+    def _weight_init(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.ConvTranspose2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
     def _up_block(self, planes):
         upconv = nn.ConvTranspose2d(self.inplanes, planes, 4, 1, 0)
@@ -68,14 +71,13 @@ class ResNetGenerator(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.decoder(x)
-        return out
+        pass
 
-class ResNetDiscriminator(nn.Module):
+class ResNetEncoder(ResNetBase):
+    """ResNet encoder mapping the input to dim(nz)
+    """
     def __init__(self, layers, ngpu, ndf, nz):
-        self.inplanes = ndf
-        self.ngpu = ngpu
-        super().__init__()
+        super().__init__(ngpu, inplanes=ndf)
 
         self.encoder = nn.Sequential(
             nn.Conv2d(3, ndf, kernel_size=7, stride=2, padding=3, bias=False),
@@ -86,49 +88,86 @@ class ResNetDiscriminator(nn.Module):
             self._make_layer(BlockType.DOWN, nz, layers[4]),
             nn.Tanh()
         )
+        self._weight_init()
+
+    def forward(self, x):
+        out = self.encoder(x)
+        return out
+
+class ResNetGenerator(ResNetBase):
+    """mapping the input dim(nz) to an image
+    """
+    def __init__(self, layers, ngpu, ngf, nz):
+        super().__init__(ngpu, inplanes=nz)
+
         self.decoder = nn.Sequential(
-            self._up_block(ndf * 6),
-            self._make_layer(BlockType.UP, ndf * 6, layers[3]),
-            self._make_layer(BlockType.UP, ndf * 4, layers[2]),
-            self._make_layer(BlockType.UP, ndf * 2, layers[1]),
-            self._make_layer(BlockType.UP, ndf, layers[0]),
-            nn.BatchNorm2d(ndf),
+            self._up_block(ngf * 6),
+            self._make_layer(BlockType.UP, ngf * 6, layers[3]),
+            self._make_layer(BlockType.UP, ngf * 4, layers[2]),
+            self._make_layer(BlockType.UP, ngf * 2, layers[1]),
+            self._make_layer(BlockType.UP, ngf, layers[0]),
+        )
+        self.transformer = nn.Sequential(
+            nn.BatchNorm2d(ngf),
             nn.ReLU(inplace=True),
-            nn.Conv2d(ndf, 3, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Tanh()
+        )
+        self._weight_init()
+
+    def forward(self, x):
+        out = self.transformer(self.decoder(x))
+        return out
+
+    def features(self, x):
+        """Extract generator features
+        """
+        return self.decoder(x)
+
+class ResNetDiscriminator(ResNetBase):
+    """ResNet autoencoder
+    """
+    def __init__(self, layers, ngpu, ngf, ndf, nz):
+        super().__init__(ngpu, inplanes=ndf)
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, ndf, kernel_size=7, stride=2, padding=3, bias=False),
+            self._make_layer(BlockType.DOWN, ndf, layers[0]),
+            self._make_layer(BlockType.DOWN, ndf * 2, layers[1]),
+            self._make_layer(BlockType.DOWN, ndf * 4, layers[2]),
+            self._make_layer(BlockType.DOWN, ndf * 6, layers[3]),
+            self._make_layer(BlockType.DOWN, nz, layers[4]),
+            nn.Tanh()
+        )
+        self.decoder = nn.Sequential(
+            self._up_block(ngf * 6),
+            self._make_layer(BlockType.UP, ngf * 6, layers[3]),
+            self._make_layer(BlockType.UP, ngf * 4, layers[2]),
+            self._make_layer(BlockType.UP, ngf * 2, layers[1]),
+            self._make_layer(BlockType.UP, ngf, layers[0]),
+        )
+        self.classifier = nn.Sequential(
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
             nn.Tanh()
         )
 
-    def _up_block(self, planes):
-        upconv = nn.ConvTranspose2d(self.inplanes, planes, 4, 1, 0)
-        self.inplanes = planes
-        return nn.Sequential(upconv)
-
-    def _make_layer(self, block_type, planes, blocks):
-        layers = []
-
-        if block_type == BlockType.DOWN:
-            layers.append(DownBlock(self.inplanes, planes))
-            for _ in range(1, blocks):
-                layers.append(PlaneBlock(planes))
-            self.inplanes = planes
-        elif block_type == BlockType.UP:
-            for _ in range(1, blocks):
-                layers.append(PlaneBlock(self.inplanes))
-            layers.append(UpBlock(self.inplanes, planes))
-            self.inplanes = planes
-        elif block_type == BlockType.PLANE:
-            for _ in range(0, blocks):
-                layers.append(PlaneBlock(self.inplanes))
-
-        return nn.Sequential(*layers)
+        self._weight_init()
 
     def forward(self, x):
-        code = self.encoder(x)
-        out = self.decoder(code)
-        return out
+        features = self.decoder(self.encoder(x))
+        return self.classifier(features)
+
+    def features(self, x):
+        """Extraxt the penultimate features of the discriminator
+        """
+        return self.decoder(self.encoder(x))
+
 
 
 class BasicBlock(nn.Module):
+    """Basic ResNet building block
+    """
     def __init__(self, planes):
         super().__init__()
 
@@ -143,6 +182,8 @@ class BasicBlock(nn.Module):
         return out
 
 class PlaneBlock(BasicBlock):
+    """ResNet block keeping input resolution and dimension unchanged
+    """
     _type = BlockType.PLANE
     def __init__(self, planes):
         super().__init__(planes)
@@ -159,6 +200,8 @@ class PlaneBlock(BasicBlock):
         return residual + BasicBlock.forward(self, out)
 
 class UpBlock(BasicBlock):
+    """ResNet upsampling block
+    """
     _type = BlockType.UP
     def __init__(self, inplanes, planes):
         super().__init__(inplanes)
@@ -176,6 +219,8 @@ class UpBlock(BasicBlock):
         return residual + out
 
 class DownBlock(BasicBlock):
+    """ResNet downsampling block
+    """
     _type = BlockType.DOWN
     def __init__(self, inplanes, planes):
         super().__init__(planes)
@@ -196,6 +241,7 @@ class DownBlock(BasicBlock):
 def resnet18(ngpu, ngf, ndf, nz):
     """Constructs a ResNet-18 based generator and discriminator model.
     """
-    disc = ResNetDiscriminator([2, 2, 2, 2, 2], ngpu, ndf, nz)
-    gen = ResNetGenerator([2, 2, 2, 2], ngpu, ngf, nz)
+    disc = ResNetDiscriminator([1, 1, 1, 1, 1], ngpu, ngf, ndf, nz)
+    gen = ResNetGenerator([1, 1, 1, 1], ngpu, ngf, nz)
     return disc, gen
+
