@@ -17,6 +17,59 @@ def conv_transpose3x3(in_planes, out_planes, stride=2):
                               padding=1, bias=False)
 
 
+class ResNetGenerator(nn.Module):
+
+    def __init__(self, block_up, layers, ngpu, ngf, nz):
+        self.inplanes = nz
+        self.ngpu = ngpu
+        super(ResNetGenerator, self).__init__()
+
+        self.decoder = nn.Sequential(
+            self._up_block(ngf * 6),
+            self._make_layer(block_up, ngf * 6, layers[3], stride=2),
+            self._make_layer(block_up, ngf * 4, layers[2], stride=2),
+            self._make_layer(block_up, ngf * 2, layers[1], stride=2),
+            self._make_layer(block_up, ngf, layers[0], stride=2),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Tanh()
+        )
+
+    def _up_block(self, planes):
+        upconv = nn.ConvTranspose2d(self.inplanes, planes, 4, 1, 0)
+        self.inplanes = planes
+        return upconv
+
+    def _make_layer(self, block, planes, blocks, stride=1):
+        layers = []
+        sampler = None
+
+        if stride != 1:
+            if block._type() == BlockType.DOWN:
+                sampler = DownSample(self.inplanes, planes * block.expansion, stride).cuda()
+                layers.append(block(self.inplanes, planes * block.expansion, sampler))
+                self.inplanes = planes * block.expansion
+                for _ in range(1, blocks):
+                    layers.append(block(self.inplanes, planes))
+
+            elif block._type() == BlockType.UP:
+                for _ in range(1, blocks):
+                    layers.append(BasicDown(self.inplanes, self.inplanes))
+                sampler = UpSample(self.inplanes, planes * block.expansion).cuda()
+                layers.append(block(self.inplanes, planes, stride, sampler))
+                self.inplanes = planes
+
+        else:
+            self.inplanes = planes * block.expansion
+            for _ in range(0, blocks):
+                layers.append(block(self.inplanes, planes))
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.decoder(x)
+
 class ResNetDiscriminator(nn.Module):
 
     def __init__(self, block_down, block_up, layers, ngpu, ndf, nz):
@@ -34,8 +87,8 @@ class ResNetDiscriminator(nn.Module):
             nn.Tanh()
         )
         self.decoder = nn.Sequential(
+            self._up_block(ndf * 6),
             self._make_layer(block_up, ndf * 6, layers[3], stride=2),
-            self._make_layer(block_up, ndf * 4, layers[2], stride=2),
             self._make_layer(block_up, ndf * 4, layers[2], stride=2),
             self._make_layer(block_up, ndf * 2, layers[1], stride=2),
             self._make_layer(block_up, ndf, layers[0], stride=2),
@@ -45,6 +98,11 @@ class ResNetDiscriminator(nn.Module):
             nn.Tanh()
         )
 
+    def _up_block(self, planes):
+        upconv = nn.ConvTranspose2d(self.inplanes, planes, 4, 1, 0)
+        self.inplanes = planes
+        return nn.Sequential(upconv)
+
     def _make_layer(self, block, planes, blocks, stride=1):
         layers = []
         sampler = None
@@ -52,14 +110,14 @@ class ResNetDiscriminator(nn.Module):
         if stride != 1:
             if block._type() == BlockType.DOWN:
                 sampler = DownSample(self.inplanes, planes * block.expansion, stride).cuda()
-                layers.append(block(self.inplanes, planes * block.expansion, sampler))
+                layers.append(block(self.inplanes, planes * block.expansion, stride, sampler))
                 self.inplanes = planes * block.expansion
                 for _ in range(1, blocks):
                     layers.append(block(self.inplanes, planes))
 
             elif block._type() == BlockType.UP:
                 for _ in range(1, blocks):
-                    layers.append(block(self.inplanes, self.inplanes))
+                    layers.append(BasicDown(self.inplanes, self.inplanes))
                 sampler = UpSample(self.inplanes, planes * block.expansion).cuda()
                 layers.append(block(self.inplanes, planes, stride, sampler))
                 self.inplanes = planes
@@ -76,8 +134,8 @@ class ResNetDiscriminator(nn.Module):
 
 
 class BlockType(Enum):
-    UP = 1
-    DOWN = 2
+    UP=1
+    DOWN=3
 
 class BasicUp(nn.Module):
     expansion = 1
@@ -106,18 +164,14 @@ class BasicUp(nn.Module):
         return out
 
     @staticmethod
-    def sampler(inplanes, planes):
-        return UpSample(inplanes, planes)
-
-    @staticmethod
     def _type():
         return BlockType.UP
-
 
 class UpSample(nn.Module):
 
     def __init__(self, inplanes, planes):
         super(UpSample, self).__init__()
+        """
         self.identity_branch = nn.Sequential(
             nn.UpsamplingNearest2d(scale_factor=2),
             nn.Conv2d(inplanes, planes, 1, 1, 0, bias=False),
@@ -126,6 +180,13 @@ class UpSample(nn.Module):
             nn.UpsamplingNearest2d(scale_factor=2),
             nn.Conv2d(inplanes, planes, 3, 1, 1, bias=False),
         )
+        """
+        self.identity_branch = nn.Sequential(
+            nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False),
+        )
+        self.weight_branch = nn.Sequential(
+            nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False),
+        )
 
     def forward(self, x1, x2):
         return self.identity_branch(x1), self.weight_branch(x2)
@@ -133,10 +194,11 @@ class UpSample(nn.Module):
 class BasicDown(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(BasicDown, self).__init__()
         self.bn1 = nn.BatchNorm2d(inplanes)
         self.relu = nn.ReLU(inplace=True)
+        self.conv1 = conv3x3(inplanes, planes, stride)
 
         self.bn2 = nn.BatchNorm2d(planes)
         self.conv2 = conv3x3(planes, planes)
@@ -147,8 +209,9 @@ class BasicDown(nn.Module):
 
         out = self.bn1(x)
         out = self.relu(out)
+        out = self.conv1(out)
         if self.downsample is not None:
-            residual, out = self.downsample(residual, out)
+            residual= self.downsample(residual)
 
         out = self.bn2(out)
         out = self.relu(out)
@@ -158,10 +221,6 @@ class BasicDown(nn.Module):
         return out
 
     @staticmethod
-    def sampler(inplanes, planes):
-        return DownSample(inplanes, planes)
-
-    @staticmethod
     def _type():
         return BlockType.DOWN
 
@@ -169,17 +228,17 @@ class DownSample(nn.Module):
     def __init__(self, inplanes, planes, stride):
         super(DownSample, self).__init__()
         self.identity_branch = nn.Conv2d(inplanes, planes, 1, stride, 0, bias=False)
-        self.weight_branch = nn.Conv2d(inplanes, planes, 3, stride, 1, bias=False)
 
-    def forward(self, x1, x2):
-        return self.identity_branch(x1), self.weight_branch(x2)
-
+    def forward(self, x1):
+        return self.identity_branch(x1)
 
 
-def resnet18(ngpu, ndf, nz):
+
+def resnet18(ngpu, ngf, ndf, nz):
     """Constructs a ResNet-18 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = ResNetDiscriminator(BasicDown, BasicUp, [1, 1, 1, 1, 1], ngpu, ndf, nz)
-    return model
+    disc = ResNetDiscriminator(BasicDown, BasicUp, [2, 2, 2, 2, 2], ngpu, ndf, nz)
+    gen = ResNetGenerator(BasicUp, [2, 2, 2, 2], ngpu, ngf, nz)
+    return disc, gen 

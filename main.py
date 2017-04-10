@@ -83,34 +83,6 @@ def main():
     began(generator, discriminator, dataloader, criterion, auxillary_variables)
     # sample(generator, discriminator, auxillary_variables)
 
-def test():
-    """
-    simple tets function which tests output size
-    """
-    nz = int(opt.nz)
-    ndf = int(opt.ndf)
-    ngpu = int(opt.ngpu)
-
-    resnetdis = resnet18(ngpu, ndf, nz).cuda()
-    print(resnetdis)
-    dummy_data = torch.cuda.FloatTensor(100, 3, 64, 64)
-    print(dummy_data.size())
-
-    dummy_var = Variable(dummy_data)
-    output = resnetdis(dummy_var)
-    print(output.size())
-    assert output.size() == dummy_data.size()
-
-def sample(generator, discriminator, auxillary_variables):
-    batch_size = int(opt.batch_size)
-
-    auxillary_variables.noise.data.resize_(batch_size, auxillary_variables.nz, 1, 1)
-    for i in range(0, 20):
-        auxillary_variables.noise.data.normal_(0, 0.7)
-        fakeg = generator(auxillary_variables.noise)
-        vutils.save_image(fakeg.data,'%s/%03d_fake_generator.png' % (opt.outf, i))
-        faked = discriminator(auxillary_variables.noise)
-        vutils.save_image(faked.data,'%s/%03d_fake_discriminator.png' % (opt.outf, i))
 
 def began(generator, discriminator, dataloader, criterion, aux):
     """Training of gan network
@@ -130,7 +102,7 @@ def began(generator, discriminator, dataloader, criterion, aux):
             data_var = Variable(data)
             batch_size = data_var.size(0)
 
-            # optimizerD.zero_grad()
+            optimizerD.zero_grad()
             for p in discriminator.parameters():
                 p.requires_grad = True
             for p in generator.parameters():
@@ -141,7 +113,7 @@ def began(generator, discriminator, dataloader, criterion, aux):
             discriminator_realloss = criterion(real_reconstruction, data_var)
 
             aux.noise.data.resize_(batch_size, aux.nz, 1, 1)
-            aux.noise.data.uniform_(-1, 1)
+            aux.noise.data.normal_(0, 1)
             noise_d_sample = generator(aux.noise).detach()
             noise_reconstruction = discriminator(noise_d_sample)
             discriminator_genloss = criterion(noise_reconstruction, noise_d_sample)
@@ -153,14 +125,14 @@ def began(generator, discriminator, dataloader, criterion, aux):
             #################################
             #       Generator training      #
             #################################
-            # optimizerG.zero_grad()
+            optimizerG.zero_grad()
             for p in discriminator.parameters():
                 p.requires_grad = False
             for p in generator.parameters():
                 p.requires_grad = True
 
             generator.zero_grad()
-            aux.noise.data.uniform_(-1, 1)
+            aux.noise.data.normal_(0, 1)
 
             noise_g_sample = generator(aux.noise)
             discriminator_sample = discriminator(noise_g_sample).detach()
@@ -187,11 +159,10 @@ def began(generator, discriminator, dataloader, criterion, aux):
             if i % 125 == 0:
                 vutils.save_image(data_var.data,
                                   '%s/%03d_real_samples.png' % (opt.outf, epoch))
-                vutils.save_image(real_reconstruction.data.mul(0.5).add(0.5),
+                vutils.save_image(real_reconstruction.data,
                                   '%s/%03d_real_reconstruction.png' % (opt.outf, epoch))
 
                 fake = generator(aux.noise)
-                fake.data = fake.data.mul(0.5).add(0.5)
                 vutils.save_image(fake.data,
                                   '%s/%03d_fake_samples.png' % (opt.outf, epoch))
 
@@ -257,7 +228,8 @@ def load_model(nc=3):
     ngpu = int(opt.ngpu)
 
     # generator = model.Generator(ngpu, nz, int(opt.ngf), nc)
-    generator = dcgan.GeneratorUp(ngpu, ngf, nc, nz)
+    # generator = dcgan.GeneratorUp(ngpu, ngf, nc, nz)
+    discriminator, generator, = resnet18(ngpu, ngf, ndf, nz)
     generator.apply(model.weights_init)
     if opt.gen != '':
         generator.load_state_dict(torch.load(opt.gen))
@@ -266,8 +238,9 @@ def load_model(nc=3):
 
     # discriminator = model.Discriminator(ngpu, nz, int(opt.ngf), nc)
     # discriminator = dcgan.DiscriminatorUp(ngpu, int(opt.ngf), int(opt.ndf), nc, nz)
-    discriminator = nn.DataParallel(resnet18(ngpu, ndf, nz))
+    #discriminator = nn.DataParallel(resnet18(ngpu, ndf, nz))
     # discriminator = resnet18(ngpu, ndf, nz)
+    # discriminator, _, = resnet18(ngpu, ngf, ndf, nz)
     discriminator.apply(model.weights_init)
     if opt.dis != '':
         discriminator.load_state_dict(torch.load(opt.dis))
@@ -275,11 +248,51 @@ def load_model(nc=3):
     if opt.cuda:
         discriminator.cuda()
         generator.cuda()
+        discriminator = nn.DataParallel(discriminator)
+        generator = nn.DataParallel(generator)
 
     print(discriminator)
     # return nn.DataParallel(generator).cuda(), discriminator
     return generator, discriminator
 
+def test():
+    """
+    simple tets function which tests output size
+    """
+    nz = int(opt.nz)
+    ndf = int(opt.ndf)
+    ngf = int(opt.ngf)
+    ngpu = int(opt.ngpu)
+
+    resnetdis, resnetgen = resnet18(ngpu, ngf, ndf, nz)
+    resnetdis.cuda()
+    resnetgen.cuda()
+    print(resnetdis)
+    dummy_data = torch.cuda.FloatTensor(100, 3, 64, 64)
+    dummy_code = torch.cuda.FloatTensor(100, nz, 1, 1)
+    print('Input size: ', dummy_data.size())
+    print('h size: ', dummy_code.size())
+
+    dummy_var = Variable(dummy_data)
+    dummy_codevar = Variable(dummy_code)
+    output = resnetdis(dummy_var)
+    fake = resnetgen(dummy_codevar)
+    print('Output size: ', output.size())
+    print('fake size: ', fake.size())
+    assert output.size() == dummy_data.size()
+    vutils.save_image(fake.data,'%s/%03d_fake_generator.png' % (opt.outf, 1))
+
+def sample(generator, discriminator, auxillary_variables):
+    batch_size = int(opt.batch_size)
+
+    auxillary_variables.noise.data.resize_(batch_size, auxillary_variables.nz, 1, 1)
+    for i in range(0, 20):
+        auxillary_variables.noise.data.normal_(0, 0.7)
+        fakeg = generator(auxillary_variables.noise)
+        vutils.save_image(fakeg.data,'%s/%03d_fake_generator.png' % (opt.outf, i))
+        faked = discriminator(auxillary_variables.noise)
+        vutils.save_image(faked.data,'%s/%03d_fake_discriminator.png' % (opt.outf, i))
+
 if __name__ == '__main__':
-    # main()
-    test()
+    main()
+    # test()
