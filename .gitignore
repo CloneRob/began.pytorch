@@ -2,3 +2,5 @@ sample*
 __pycache__
 .idea
 test.py
+*.png
+*.pyc

@@ -36,3 +36,32 @@ def sample(generator, discriminator, auxillary_variables, batch_size = 104, outf
         vutils.save_image(fakeg.data, '%s/%03d_fake_generator.png' % (outf, i))
         faked = discriminator(auxillary_variables.noise)
         vutils.save_image(faked.data, '%s/%03d_fake_discriminator.png' % (outf, i))
+
+def normalization_values(data_path, img_size):
+    import torchvision.datasets as dset
+    import torchvision.transforms as transforms
+    dataset = dset.ImageFolder(root=data_path,
+                               transform=transforms.Compose([
+                                   # transforms.Scale(img_size),
+                                   transforms.ToTensor(),
+                               ]))
+    n = len(dataset)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=512,
+                                             shuffle=False, num_workers=16)
+    accum = torch.FloatTensor(3, img_size, img_size)
+    accum.zero_()
+
+    for i, (data, _) in enumerate(dataloader, 0):
+        accum += data.sum(dim=0)
+        if i % 250 == 0:
+            print('[{}/{}]'.format(i * 512, n))
+    accum /= n
+    print('Mean: R: {}, G: {}, B: {}'.format(accum[0].mean(), accum[1].mean(), accum[2].mean()))
+    print('Std: R: {}, G: {}, B: {}'.format(accum[0].std(), accum[1].std(), accum[2].std()))
+    vutils.save_image(accum, './mean_image.png')
+
+def adjust_lr(optimizer, epoch, initial_lr=0.00005):
+    lr = initial_lr * (0.5 ** (epoch // 25))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr

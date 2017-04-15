@@ -102,16 +102,16 @@ class ResNetGenerator(ResNetBase):
 
         self.decoder = nn.Sequential(
             self._up_block(ngf * 6),
-            self._make_layer(BlockType.UP, ngf * 6, layers[3]),
-            self._make_layer(BlockType.UP, ngf * 4, layers[2]),
-            self._make_layer(BlockType.UP, ngf * 2, layers[1]),
-            self._make_layer(BlockType.UP, ngf, layers[0]),
+            self._make_layer(BlockType.UP, ngf * 6, layers[0]),
+            self._make_layer(BlockType.UP, ngf * 4, layers[1]),
+            self._make_layer(BlockType.UP, ngf * 2, layers[2]),
+            self._make_layer(BlockType.UP, ngf, layers[3]),
         )
         self.transformer = nn.Sequential(
             nn.BatchNorm2d(ngf),
             nn.ReLU(inplace=True),
             nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.Tanh()
+            nn.Sigmoid()
         )
         self._weight_init()
 
@@ -134,13 +134,12 @@ class ResNetDiscriminator(ResNetBase):
             self._make_layer(BlockType.DOWN, ndf, layers[0]),
             self._make_layer(BlockType.DOWN, ndf * 2, layers[1]),
             self._make_layer(BlockType.DOWN, ndf * 4, layers[2]),
-            self._make_layer(BlockType.DOWN, ndf * 6, layers[3]),
-            self._make_layer(BlockType.DOWN, nz, layers[4]),
-            nn.Tanh()
+            self._make_layer(BlockType.DOWN, ndf * 8, layers[3]),
+            self._make_layer(BlockType.DOWN, nz, 1),
         )
         self.decoder = nn.Sequential(
             self._up_block(ngf * 6),
-            self._make_layer(BlockType.UP, ngf * 6, layers[3]),
+            self._make_layer(BlockType.UP, ngf * 8, layers[3]),
             self._make_layer(BlockType.UP, ngf * 4, layers[2]),
             self._make_layer(BlockType.UP, ngf * 2, layers[1]),
             self._make_layer(BlockType.UP, ngf, layers[0]),
@@ -149,14 +148,13 @@ class ResNetDiscriminator(ResNetBase):
             nn.BatchNorm2d(ngf),
             nn.ReLU(inplace=True),
             nn.Conv2d(ngf, 3, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.Tanh()
+            nn.Sigmoid()
         )
 
         self._weight_init()
 
     def forward(self, x):
-        features = self.decoder(self.encoder(x))
-        return self.classifier(features)
+        return self.classifier(self.decoder(self.encoder(x)))
 
     def features(self, x):
         """Extraxt the penultimate features of the discriminator
@@ -207,8 +205,18 @@ class UpBlock(BasicBlock):
         super().__init__(inplanes)
 
         self.up_bn = nn.BatchNorm2d(inplanes)
+        """
         self.up_conv = nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False)
         self.shortcut = nn.ConvTranspose2d(inplanes, planes, 2, 2, 0, bias=False)
+        """
+        self.up_conv = nn.Sequential(
+            nn.UpsamplingNearest2d(scale_factor=2),
+            nn.Conv2d(inplanes, planes, 3, 1, 1, bias=False),
+        )
+        self.shortcut = nn.Sequential(
+            nn.UpsamplingNearest2d(scale_factor=2),
+            nn.Conv2d(inplanes, planes, 1, 1, 0, bias=False),
+        )
 
     def forward(self, x):
         residual = self.shortcut(x)
@@ -238,10 +246,23 @@ class DownBlock(BasicBlock):
 
 
 
-def resnet18(ngpu, ngf, ndf, nz):
+def resnet(ngpu, ngf, ndf, nz):
     """Constructs a ResNet-18 based generator and discriminator model.
     """
-    disc = ResNetDiscriminator([1, 1, 1, 1, 1], ngpu, ngf, ndf, nz)
+    disc = ResNetDiscriminator([1, 1, 1, 1], ngpu, ngf, ndf, nz)
     gen = ResNetGenerator([1, 1, 1, 1], ngpu, ngf, nz)
     return disc, gen
 
+def resnet18(ngpu, ngf, ndf, nz):
+    """Constructs a ResNet-18 based generator and discriminator model.
+    """
+    disc = ResNetDiscriminator([2, 2, 2, 2], ngpu, ngf, ndf, nz)
+    gen = ResNetGenerator([2, 2, 2, 2], ngpu, ngf, nz)
+    return disc, gen
+
+def resnet34(ngpu, ngf, ndf, nz):
+    """Constructs a ResNet-18 based generator and discriminator model.
+    """
+    disc = ResNetDiscriminator([3, 4, 6, 2], ngpu, ngf, ndf, nz)
+    gen = ResNetGenerator([3, 4, 6, 3], ngpu, ngf, nz)
+    return disc, gen

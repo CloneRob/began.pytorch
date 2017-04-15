@@ -25,37 +25,37 @@ class Discriminator(nn.Module):
 
         self.encoder = nn.Sequential(
             nn.Conv2d(nc, ndf, 3, 1, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             nn.Conv2d(ndf, ndf, 3, 1, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
             nn.Conv2d(ndf, ndf, 3, 1, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             # Subsampling
             nn.Conv2d(ndf, ndf * 2, 3, 2, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             nn.Conv2d(ndf * 2, ndf * 2, 3, 1, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
             nn.Conv2d(ndf * 2, ndf * 2, 3, 1, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             # Subsampling
             nn.Conv2d(ndf * 2, ndf * 3, 3, 2, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             nn.Conv2d(ndf * 3, ndf * 3, 3, 1, 1),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
             nn.Conv2d(ndf * 3, ndf * 3, 3, 1, 1, bias=False),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             # Subsampling
             nn.Conv2d(ndf * 3, ndf * 4, 3, 2, 1, bias=False),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
 
             nn.Conv2d(ndf * 4, ndf * 4, 3, 1, 1, bias=False),
-            nn.ReLU(inplace=True),
+            nn.ELU(inplace=True),
             nn.Conv2d(ndf * 4, ndf * 4, 3, 1, 1, bias=False),
         )
         self.fc_down = nn.Linear(8 * 8 * ndf * 4, nz)
