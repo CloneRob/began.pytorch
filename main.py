@@ -90,7 +90,7 @@ def main():
 
     auxillary_variables = AuxilaryVariables(opt.batch_size, nz)
 
-    began2(generator, discriminator, dataloader, criterion, auxillary_variables)
+    began(generator, discriminator, dataloader, criterion, auxillary_variables)
 
 
 def began(generator, discriminator, dataloader, criterion, aux):
@@ -116,28 +116,38 @@ def began(generator, discriminator, dataloader, criterion, aux):
             batch_size = data_var.size(0)
 
             optimizerD.zero_grad()
-            for p in 
 
-            real_reconstruction = discriminator(data_var)
+            """
+            for p in generator.parameters():
+                p.requires_grad = False
+            for p in discriminator.parameters():
+                p.requires_grad = True
+            """
 
             aux.noise.data.resize_(batch_size, aux.nz, 1, 1)
             aux.noise.data.uniform_(-1, 1)
-            noise_d_sample = generator(aux.noise).detach()
+            noise_d_sample = generator(aux.noise)
 
             data_in = torch.cat((data_var, noise_d_sample))
             data_out = discriminator(data_in)
             real_reconstruction, noise_reconstruction = torch.chunk(data_out, 2) 
 
             discriminator_realloss = criterion(real_reconstruction, data_var)
-            discriminator_genloss = criterion(noise_reconstruction, noise_d_sample)
+            discriminator_genloss = criterion(noise_reconstruction, noise_d_sample.detach())
             err_discriminator = discriminator_realloss - k_var * discriminator_genloss
-            err_discriminator.backward()
+            err_discriminator.backward(retain_variables=True)
 
-            optimizerG.zero_grad()
+            """
+            for p in generator.parameters():
+                p.requires_grad = True
+            for p in discriminator.parameters():
+                p.requires_grad = False
             aux.noise.data.uniform_(-1, 1)
             noise_g_sample = generator(aux.noise)
-            noise_g_reconstruction = discriminator(noise_g_sample)
-            generator_loss = criterion(noise_g_sample, noise_g_reconstruction.detach())
+            noise_g_reconstruction = discriminator(noise_g_sample).detach()
+            """
+            optimizerG.zero_grad()
+            generator_loss = criterion(noise_d_sample, noise_reconstruction.detach())
             generator_loss.backward()
                 
 
@@ -166,11 +176,10 @@ def began(generator, discriminator, dataloader, criterion, aux):
                     global_measure.data[0], k_var.data[0]))
 
             if i % 125 == 0:
-                vutils.save_image(data_var.data, '%s/%03d_real_samples.png' % (opt.outf, epoch))
-                vutils.save_image(real_reconstruction.data, '%s/%03d_real_reconstruction.png' % (opt.outf, epoch))
+                vutils.save_image(data_var.data.mul(0.5).add(0.5), '%s/%03d_real_samples.png' % (opt.outf, epoch))
+                vutils.save_image(real_reconstruction.data.mul(0.5).add(0.5), '%s/%03d_real_reconstruction.png' % (opt.outf, epoch))
 
-                fake = generator(aux.fixed_noise)
-                vutils.save_image(fake.data, '%s/%03d_fake_samples.png' % (opt.outf, epoch))
+                vutils.save_image(noise_d_sample.data.mul(0.5).add(0.5), '%s/%03d_fake_samples.png' % (opt.outf, epoch))
 
         # do checkpointing
         if epoch % 10 == 0:
@@ -245,11 +254,11 @@ def began2(generator, discriminator, dataloader, criterion, aux):
                     global_measure.data[0], k_var.data[0]))
 
             if i % 125 == 0:
-                vutils.save_image(data_var.data, '%s/%03d_real_samples.png' % (opt.outf, epoch))
-                vutils.save_image(real_reconstruction.data, '%s/%03d_real_reconstruction.png' % (opt.outf, epoch))
+                vutils.save_image(data_var.data.mul(0.5).add(0.5), '%s/%03d_real_samples.png' % (opt.outf, epoch))
+                vutils.save_image(real_reconstruction.data.mul(0.5).add(0.5), '%s/%03d_real_reconstruction.png' % (opt.outf, epoch))
 
                 fake = generator(aux.fixed_noise)
-                vutils.save_image(fake.data, '%s/%03d_fake_samples.png' % (opt.outf, epoch))
+                vutils.save_image(fake.data.mul(0.5).add(0.5), '%s/%03d_fake_samples.png' % (opt.outf, epoch))
 
         # do checkpointing
         if epoch % 10 == 0:
@@ -268,6 +277,7 @@ def get_dataloader():
                                    transforms.RandomCrop(opt.imageSize),
                                    transforms.RandomHorizontalFlip(),
                                    transforms.ToTensor(),
+                                   transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
                                ]))
 # transforms.Normalize(mean=(0.3683006, 0.4098993 ,0.5039812),
 #                      std=(0.0123775,  0.01128755, 0.01031650)),
@@ -329,9 +339,10 @@ def load_model(nc=3):
     print(discriminator)
     """
     discriminator = dcgan.DiscriminatorUp(ngpu, ngf, ndf, nc, nz)
+    # discriminator = model.Discriminator(ngpu, ndf, nc, nz)
     discriminator.apply(model.weights_init)
     print(discriminator)
-    # generator = model.Generator(ngpu, ngf, nc, nz)
+    generator = model.Generator(ngpu, ngf, nc, nz)
     generator = dcgan.GeneratorUp(ngpu, ngf, nc, nz)
     generator.apply(model.weights_init)
     print(generator)
@@ -339,8 +350,8 @@ def load_model(nc=3):
     if opt.cuda:
         discriminator.cuda()
         generator.cuda()
-        # discriminator = nn.DataParallel(discriminator)
-        # generator = nn.DataParallel(generator)
+        discriminator = nn.DataParallel(discriminator)
+        generator = nn.DataParallel(generator)
 
     return generator, discriminator
 

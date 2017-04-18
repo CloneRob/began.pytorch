@@ -25,67 +25,67 @@ class Discriminator(nn.Module):
         self.ndf = ndf
 
         self.encoder = nn.Sequential(
-            nn.Conv2d(nc, ndf, 3, 1, 1),
+            nn.Conv2d(nc, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
 
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
-            nn.ELU(inplace=True),
-
-            # Subsampling
-            nn.Conv2d(ndf, ndf * 2, 3, 2, 1),
-            nn.ELU(inplace=True),
-
-            nn.Conv2d(ndf * 2, ndf * 2, 3, 1, 1),
-            nn.ELU(inplace=True),
-            nn.Conv2d(ndf * 2, ndf * 2, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
 
             # Subsampling
-            nn.Conv2d(ndf * 2, ndf * 3, 3, 2, 1),
+            nn.Conv2d(ndf, ndf * 2, 3, 2, 1, bias=True),
             nn.ELU(inplace=True),
 
-            nn.Conv2d(ndf * 3, ndf * 3, 3, 1, 1),
+            nn.Conv2d(ndf * 2, ndf * 2, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf * 3, ndf * 3, 3, 1, 1),
+            nn.Conv2d(ndf * 2, ndf * 2, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
 
             # Subsampling
-            nn.Conv2d(ndf * 3, ndf * 4, 3, 2, 1),
+            nn.Conv2d(ndf * 2, ndf * 3, 3, 2, 1, bias=True),
             nn.ELU(inplace=True),
 
-            nn.Conv2d(ndf * 4, ndf * 4, 3, 1, 1),
+            nn.Conv2d(ndf * 3, ndf * 3, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf * 4, ndf * 4, 3, 1, 1),
+            nn.Conv2d(ndf * 3, ndf * 3, 3, 1, 1, bias=True),
+            nn.ELU(inplace=True),
+
+            # Subsampling
+            nn.Conv2d(ndf * 3, ndf * 4, 3, 2, 1, bias=True),
+            nn.ELU(inplace=True),
+
+            nn.Conv2d(ndf * 4, ndf * 4, 3, 1, 1, bias=True),
+            nn.ELU(inplace=True),
+            nn.Conv2d(ndf * 4, ndf * 4, 3, 1, 1, bias=True),
         )
         self.fc_down = nn.Linear(8 * 8 * ndf * 4, nz)
         self.fc_up = nn.Linear(nz, 8 * 8 * ndf)
 
         self.decoder = nn.Sequential(
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
-            nn.ELU(inplace=True),
-            nn.UpsamplingNearest2d(scale_factor=2),
-
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
-            nn.ELU(inplace=True),
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
             nn.UpsamplingNearest2d(scale_factor=2),
 
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
             nn.UpsamplingNearest2d(scale_factor=2),
 
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf, ndf, 3, 1, 1),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ndf, nc, 3, 1, 1),
+            nn.UpsamplingNearest2d(scale_factor=2),
+
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
+            nn.ELU(inplace=True),
+            nn.Conv2d(ndf, ndf, 3, 1, 1, bias=True),
+            nn.ELU(inplace=True),
+            nn.Conv2d(ndf, nc, 3, 1, 1, bias=True),
         )
 
     def forward(self, input):
@@ -104,29 +104,29 @@ class Generator(nn.Module):
 
         self.fc = nn.Linear(nz, 8 * 8 * ngf)
         self.main = nn.Sequential(
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
-            nn.ELU(inplace=True),
-            nn.UpsamplingNearest2d(scale_factor=2),
-
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
-            nn.ELU(inplace=True),
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
             nn.UpsamplingNearest2d(scale_factor=2),
 
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
             nn.UpsamplingNearest2d(scale_factor=2),
 
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ngf, ngf, 3, 1, 1),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
             nn.ELU(inplace=True),
-            nn.Conv2d(ngf, nc, 3, 1, 1),
+            nn.UpsamplingNearest2d(scale_factor=2),
+
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
+            nn.ELU(inplace=True),
+            nn.Conv2d(ngf, ngf, 3, 1, 1, bias=True),
+            nn.ELU(inplace=True),
+            nn.Conv2d(ngf, nc, 3, 1, 1, bias=True),
         )
 
     def forward(self, input):
