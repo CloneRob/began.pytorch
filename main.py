@@ -36,7 +36,7 @@ print(opt)
 #     os.environ["CUDA_VISIBLE_DEVICES"] = opt.device_id
 
 try:
-    os.makedirs(opt.outf)
+    os.makedirs(os.path.join(opt.outf, 'samples'))
 except OSError:
     pass
 print("Seed: ", opt.manualSeed)
@@ -121,13 +121,13 @@ def began(generator, discriminator, dataloader, criterion, aux):
                     global_measure.data[0], k_var.data[0]))
 
             if i % 125 == 0:
-                vutils.save_image(data_var.data,
+                vutils.save_image(data_var.data.add(aux.mean.expand_as(data_var)),
                                   '%s/samples/%03d-%03d_real_samples.png' % (opt.outf, i, epoch))
-                vutils.save_image(real_reconstruction.data,
+                vutils.save_image(real_reconstruction.data.add(aux.mean.expand_as(data_var)),
                                   '%s/samples/%03d-%03d_real_reconstruction.png' % (opt.outf, i, epoch))
 
                 fake = generator(aux.noise)
-                vutils.save_image(fake.data,
+                vutils.save_image(fake.data.add(aux.mean.expand_as(data_var)),
                                   '%s/samples/%03d-%03d_fake_samples.png' % (opt.outf, i, epoch))
         torch.save(generator.state_dict(), '%s/generator%d.pth' % (opt.outf, epoch))
         torch.save(discriminator.state_dict(), '%s/discriminator%d.pth' % (opt.outf, epoch))
@@ -136,6 +136,8 @@ def began(generator, discriminator, dataloader, criterion, aux):
 def get_dataloader():
     """
     Creates the dataloader from the given imagepath
+    Barrett Data Mean: R: 0.5039812792256271, G: 0.40989934259960137, B: 0.3683006199917145
+    Barrett Data Std: R: 0.01237758766377634, G: 0.011287555487577814, B: 0.010316500128800232
     """
     print('Hi from dataloader')
     root = os.path.join(opt.dataroot, opt.dataset)
@@ -146,12 +148,9 @@ def get_dataloader():
                                    transforms.RandomCrop(opt.imageSize),
                                    transforms.RandomHorizontalFlip(),
                                    transforms.ToTensor(),
-                                   transforms.Normalize(mean=(0.5, 0.5, 0,5), std=(0.5, 0.5, 0.5))
+                                   transforms.Normalize(mean=(0.50398127, 0.40989934, 0.36830061),
+                                                       std=(1.0, 1.0, 1.0)),
                                ]))
-# transforms.Normalize(mean=(0.3683006, 0.4098993 ,0.5039812),
-#                      std=(0.0123775,  0.01128755, 0.01031650)),
-# Mean: R: 0.5039812792256271, G: 0.40989934259960137, B: 0.3683006199917145
-# Std: R: 0.01237758766377634, G: 0.011287555487577814, B: 0.010316500128800232
 
     assert dataset
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size,
@@ -169,9 +168,12 @@ class AuxilaryVariables():
         noise = torch.FloatTensor(batch_size, latent_dim, 1, 1)
         fixed_noise = torch.FloatTensor(
             batch_size, latent_dim, 1, 1).uniform_(-1, 1)
-        mean_tensor = torch.FloatTensor(3, opt.imageSize, opt.imageSize)
         label = torch.FloatTensor(batch_size)
 
+        mean_tensor = torch.FloatTensor(3, opt.imageSize, opt.imageSize)
+        mean_tensor[0].fill_(0.50398127)
+        mean_tensor[1].fill_(0.40989934)
+        mean_tensor[2].fill_(0.36830061)
         std_tensor = torch.FloatTensor(3, opt.imageSize, opt.imageSize)
         std_tensor[0].fill_(0.0123775)
         std_tensor[1].fill_(0.01128755)
