@@ -1,0 +1,30 @@
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--dataset', required=False, help='Location of data, combined with dataroot',
+                    default='Augsburg/barrett_split/circular_split/128x128')
+parser.add_argument('--dataroot', required=False, help='Dataset root', default='/mnt/datassd/Projects/Datasets/')
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=8)
+parser.add_argument('--batch_size', type=int, default=100, help='input batch size')
+parser.add_argument('--imageSize', type=int, default=64, help='the height / width of the input image to network')
+parser.add_argument('--nz', type=int, default=256, help='size of the latent z vector')
+parser.add_argument('--ngf', type=int, default=64)
+parser.add_argument('--ndf', type=int, default=64)
+parser.add_argument('--niter', type=int, default=300, help='number of epochs to train for')
+parser.add_argument('--lr', type=float, default=0.0005, help='learning rate, default=0.0002')
+parser.add_argument('--dlr', type=float, default=0.00005, help='learning rate, default=0.0002')
+parser.add_argument('--glr', type=float, default=0.00005, help='learning rate, default=0.0002')
+parser.add_argument('--klr', type=float, default=0.0, help='learning rate for k, default=0.0002')
+parser.add_argument('--lb', type=float, default=0.0, help='lower bound for k, default=0.0')
+parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
+parser.add_argument('--cuda', action='store_true', help='enables cuda')
+parser.add_argument('--gen', default='', help="path to netG (to continue training)")
+parser.add_argument('--dis', default='', help="path to netD (to continue training)")
+parser.add_argument('--start_epoch', type=int, default=0)
+parser.add_argument('--outf', default='./samples/sample0', help='folder to output images and model checkpoints')
+parser.add_argument('--device_id', default='', help='GPU device id where the model is run')
+parser.add_argument('--ngpu', type=int, default=2, help='number of GPUs to use')
+parser.add_argument('--manualSeed', type=int, default=99)
+
+def get_config():
+    return parser.parse_args()
